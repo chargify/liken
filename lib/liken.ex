@@ -69,7 +69,7 @@ defmodule Liken do
   # We want to support passing a struct in directly.
   # And we still want to recursively inspect the keys
   # But this approach will require every key to match (including nils)
-  defp fuzzy_compare(actual, %Fuzzy{expected: %{__struct__: struct}=expected}, path) do
+  defp fuzzy_compare(actual, %Fuzzy{expected: %{__struct__: struct}=expected}, path) when is_map(actual) do
     actual.__struct__ == struct &&
       Map.from_struct(expected) |> Enum.all?(fn({key, value}) ->
         compare(Map.get(actual, key), value, path ++ ["#{struct}[#{inspect key}]"])
@@ -83,7 +83,7 @@ defmodule Liken do
   end
 
   # Like this Map?
-  defp fuzzy_compare(actual, %Fuzzy{expected: expected}, path) when is_map(expected) do
+  defp fuzzy_compare(actual, %Fuzzy{expected: expected}, path) when is_map(expected) and is_map(actual) do
     Enum.all?(expected, fn({key, value}) ->
       compare(Map.get(actual, key), value, path ++ ["Map[#{inspect key}]"])
     end)

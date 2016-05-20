@@ -232,6 +232,28 @@ defmodule LikenTest do
     """, func
   end
 
+  test "the ultimate example" do
+    actual = %{
+      first: [1, 2, 3, %{us: "us", them: "them"}, 5],
+      second: "ignored",
+      third: %TestStruct{a: 1, b: 2},
+      fourth: [
+        %{key1: "111", key2: "222"},
+        %{key3: [3,3,3,3], key4: "444"}
+      ]
+    }
+    expected = %{
+      first: includes?([1, includes?(%{us: "us"})]),
+      third: includes?(TestStruct, %{a: 1}),
+      fourth: includes?([
+        includes?(%{key2: "222"}),
+        includes?(%{key3: includes?([3,3,3,3]), key4: "444"})
+      ])
+    }
+
+    assert actual |> must_contain(expected)
+  end
+
   @tag :pending
   test "fail it" do
     assert %{a: 1} |> must_contain(%{a: 2})
