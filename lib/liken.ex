@@ -1,17 +1,57 @@
 defmodule Liken do
   defmodule Fuzzy do
-    defstruct expected: nil
+    defstruct expected: nil, struct: nil
   end
 
-  def like?(actual, expected) do
-    compare(actual, like?(expected), [])
+  @doc """
+  must_contain/2 is used in an assert:
+
+      assert actual |> like?(expected)
+  """
+  def must_contain(actual, expected) do
+    compare(actual, includes?(expected), [])
   end
 
-  def like?(expected) do
+  @doc """
+  must_contain/3 allows for top-level fuzzy matching of
+  a struct, without requiring all the keys to be specified in the expected
+  """
+  def must_contain(actual, struct, map) do
+    compare(actual, includes?(struct, map), [])
+  end
+
+  @doc """
+  like/1
+  """
+  def includes?(expected) do
     %Fuzzy{expected: expected}
   end
 
-  defp compare(actual, %Fuzzy{expected: expected}, path) do
+  @doc """
+  like/2
+
+  Performs a fuzzy match on a struct.
+
+  Because a Struct auto-nils all non-provided fields,
+  if you expect to match only CERTAIN fields, you can not
+  pass in a struct directly to like/1.  Instead, you pass the struct
+  module's name and a map.
+
+  e.g. Don't do:
+
+      # if MyStruct has fields a & b:
+      includes?(%MyStruct{a: 1})
+      # This won't match %MyStruct{a: 1, b: 1}, because b: nil is implied
+
+  Instead:
+
+      includes?(MyStruct, %{a: 1})
+  """
+  def includes?(struct, expected) when is_atom(struct) do
+    %Fuzzy{struct: struct, expected: expected}
+  end
+
+  defp compare(actual, %Fuzzy{} = expected, path) do
     fuzzy_compare(actual, expected, path) or fail_fuzzy!(actual, expected, path)
   end
 
@@ -20,55 +60,76 @@ defmodule Liken do
   end
 
   # Like this Regex?
-  defp fuzzy_compare(actual, %Regex{} = regex, _path) do
+  defp fuzzy_compare(actual, %Fuzzy{expected: %Regex{} = regex}, _path) do
     String.match?(actual, regex)
   end
 
+  # Exact match on a struct
+  #
+  # We want to support passing a struct in directly.
+  # And we still want to recursively inspect the keys
+  # But this approach will require every key to match (including nils)
+  defp fuzzy_compare(actual, %Fuzzy{expected: %{__struct__: struct}=expected}, path) do
+    actual.__struct__ == struct &&
+      Map.from_struct(expected) |> Enum.all?(fn({key, value}) ->
+        compare(Map.get(actual, key), value, path ++ ["#{struct}[#{inspect key}]"])
+      end)
+  end
+
   # Like this Struct?
-  defp fuzzy_compare(actual, %{__struct__: expected_type} = struct, path) do
-    actual.__struct__ == expected_type &&
-      compare(struct_to_map(actual), like?(struct_to_map(struct)), path)
+  defp fuzzy_compare(actual, %Fuzzy{expected: expected, struct: struct}, path) when not is_nil(struct) do
+    actual.__struct__ == struct &&
+      compare(Map.from_struct(actual), includes?(expected), path)
   end
 
   # Like this Map?
-  defp fuzzy_compare(actual, expected, path) when is_map(expected) do
+  defp fuzzy_compare(actual, %Fuzzy{expected: expected}, path) when is_map(expected) do
     Enum.all?(expected, fn({key, value}) ->
-      compare(actual[key], value, path ++ ["Map[#{key}]"])
+      compare(Map.get(actual, key), value, path ++ ["Map[#{inspect key}]"])
     end)
   end
 
-  # TODO: Like this List?
-  # Need to see if everything from expected matches something in actual.  After a match
-  # is made, the element needs to be removed from expected, because we don't want to match
-  # the same thing multiple times.  Also need to handle path updates...
-  defp fuzzy_compare(_actual, expected, _path) when is_list(expected) do
-    raise "TODO"
+  # There are lots of ways to "fuzzy" match a list:  Contains?  Subset?  Sublist?  Ordered?  Unordered?
+  #
+  # Liken defines a "fuzzy" match on a list to be:  all elements of expected are contained
+  # inside actual in the same order.  Actual may have MORE elements, interspersed anywhere (before, after, in-between)
+  #
+  #
+  defp fuzzy_compare(actual, %Fuzzy{expected: expected}, path) when is_list(expected) do
+    fuzzy_list_compare(actual, expected, path)
   end
 
-  # Like this Sring?
-  defp fuzzy_compare(actual, expected, _path) when is_binary(expected) do
+  # Like this String?
+  defp fuzzy_compare(actual, %Fuzzy{expected: expected}, _path) when is_binary(expected) do
     String.contains?(actual, expected)
   end
 
   # Catch all
+  defp fuzzy_compare(actual, %Fuzzy{expected: expected}, _path) do
+    actual == expected
+  end
+
   defp fuzzy_compare(actual, expected, _path) do
     actual == expected
   end
 
-  # Turns a Struct into a Map while removing all keys with nil values.
-  #
-  # This is necessary since the "expected" map should match when it is a
-  # sparse subset of the actual, and `Map.from_struct` ALWAYS includes all
-  # keys from the struct, which affects our ability to do a sparse match.
-  # See notes on "Sparse matching structs" in the docs for `like?/2`.
-  defp struct_to_map(struct) do
-    map = struct
-    |> Map.from_struct
-    |> Enum.filter(fn({_, val}) -> val end)
-    map
+  defp fuzzy_list_compare([], [], _path), do: true
+  # We've run out of expecteds, meaning we found all expecteds that we wanted.  That's a good thing
+  defp fuzzy_list_compare(list, [], _path), do: true
+  defp fuzzy_list_compare([], list, _path), do: false
+
+  defp fuzzy_list_compare([ah|at] = actual, [eh|et] = expected, path) do
+    if fuzzy_compare(ah, eh, path) do
+      # The two elements match, so move on to the next two
+      fuzzy_list_compare(at, et, path)
+    else
+      # The expected element wasn't there, so move forward to the next actual and see
+      # if that's the right one
+      fuzzy_list_compare(at, expected, path)
+    end
   end
 
-  defp fail_fuzzy!(actual, expected, path) do
+  defp fail_fuzzy!(actual, %Fuzzy{expected: expected}, path) do
     raise ExUnit.AssertionError, message: """
     Actual value was not like Expected value:
     #{shared_fail_message(actual, expected, path)}
@@ -77,7 +138,8 @@ defmodule Liken do
 
   defp fail_exact!(actual, expected, path) do
     raise ExUnit.AssertionError, message: """
-    Actual value was not an exact match for Expected value: #{shared_fail_message(actual, expected, path)}
+    Actual value was not an exact match for Expected value:
+    #{shared_fail_message(actual, expected, path)}
     """
   end
 

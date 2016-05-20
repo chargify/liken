@@ -4,11 +4,11 @@ defmodule LikenTest do
   doctest Liken
 
   test "an Integer is like the same Integer" do
-    assert 1 |> like?(1)
+    assert 1 |> must_contain(1)
   end
 
   test "an Integer is not like another Integer" do
-    func = fn -> like?(1, 2) end
+    func = fn -> must_contain(1, 2) end
 
     assert_raise ExUnit.AssertionError, """
     Actual value was not like Expected value:
@@ -26,14 +26,14 @@ defmodule LikenTest do
     this = %{a: %{b: 2}}
     that = %{a: %{b: 2}}
 
-    assert this |> like?(that)
+    assert this |> must_contain(that)
   end
 
   test "a Map is not like a different Map" do
-    func = fn-> like?(%{a: 1}, %{a: 2}) end
+    func = fn-> must_contain(%{a: 1}, %{a: 2}) end
 
     assert_raise ExUnit.AssertionError, """
-    Actual value was not exact match for Expected value:
+    Actual value was not an exact match for Expected value:
 
     At:
     Map[:a]
@@ -52,15 +52,15 @@ defmodule LikenTest do
     that = %{a: 1}
     blat = %{b: 2}
 
-    assert this |> like?(that)
-    assert this |> like?(blat)
+    assert this |> must_contain(that)
+    assert this |> must_contain(blat)
   end
 
   test "a Map is not like its superset" do
-    func = fn-> like?(%{a: 1}, %{a: 1, b: 2}) end
+    func = fn-> must_contain(%{a: 1}, %{a: 1, b: 2}) end
 
     assert_raise ExUnit.AssertionError, """
-    Actual value was not like Expected value:
+    Actual value was not an exact match for Expected value:
 
     At:
     Map[:b]
@@ -70,14 +70,15 @@ defmodule LikenTest do
 
     Expected:
     2
+
     """, func
   end
 
   test "a Map is not like another Map if their nested structures differ as a subset" do
-    func = fn-> like?(%{a: %{b: 2, c: 3}}, %{a: %{b: 2}}) end
+    func = fn-> must_contain(%{a: %{b: 2, c: 3}}, %{a: %{b: 2}}) end
 
     assert_raise ExUnit.AssertionError, """
-    Actual value was not like Expected value:
+    Actual value was not an exact match for Expected value:
 
     At:
     Map[:a]
@@ -87,44 +88,56 @@ defmodule LikenTest do
 
     Expected:
     %{b: 2}
+
     """, func
   end
 
   test "a Map with all values as subsets can be like another Map when cascading `like`s are used" do
     this = %{a: %{b: 2, c: 3}}
-    that = %{a: like?(%{b: 2})}
+    that = %{a: includes?(%{b: 2})}
 
-    assert this |> like?(that)
+    assert this |> must_contain(that)
   end
 
   test "a List is like the same list" do
-    this = [1, 2, 3]
-    that = [1, 2, 3]
+    actual = [1, 2, 3]
+    expected = [1, 2, 3]
 
-    assert this |> like?(that)
+    assert actual |> must_contain(expected)
   end
 
   test "a List is like a subset List" do
-    this = [1, 2, 3]
-    that = [1, 2]
+    actual = [1, 2, 3, 4, 5]
+    expected = [2, 4]
 
-    assert this |> like?(that)
+    assert actual |> must_contain(expected)
   end
 
-  @tag :pending
   test "a List is not like a superset List" do
-    this = [1, 2]
-    that = [1, 2, 3]
+    func = fn ->
+      actual = [1, 2, 3, 4, 5]
+      expected = [2, 6]
+      actual |> must_contain(expected)
+    end
 
-    refute this |> like?(that)
+    assert_raise ExUnit.AssertionError, """
+    Actual value was not like Expected value:
+
+    Actual:
+    [1, 2, 3, 4, 5]
+
+    Expected:
+    [2, 6]
+
+    """, func
   end
 
   test "a String is like the same String" do
-    assert "foo" |> like?("foo")
+    assert "foo" |> must_contain("foo")
   end
 
   test "a String is like a substring" do
-    assert "foo" |> like?("oo")
+    assert "foo" |> must_contain("oo")
   end
 
   test "a String is not like a superstring" do
@@ -137,15 +150,26 @@ defmodule LikenTest do
     Expected:
     "food"
 
-    """, fn -> like?("foo", "food") end
+    """, fn -> must_contain("foo", "food") end
   end
 
   test "a Regex is like a String when it matches" do
-    assert "foo" |> like?(~r/\Afo/)
+    assert "foo" |> must_contain(~r/\Afo/)
   end
 
   test "a Regex is not like a String when it does not match" do
-    refute "foo" |> like?(~r/\Aoo/)
+    func = fn -> "foo" |> must_contain(~r/\Aoo/) end
+
+    assert_raise ExUnit.AssertionError, """
+    Actual value was not like Expected value:
+
+    Actual:
+    "foo"
+
+    Expected:
+    ~r/\\Aoo/
+
+    """, func
   end
 
   defmodule TestStruct do
@@ -157,22 +181,59 @@ defmodule LikenTest do
   end
 
   test "a Struct is like the same Struct" do
-    assert %TestStruct{a: 1} |> like?(%TestStruct{a: 1})
+    expected = %TestStruct{a: 1}
+    actual   = %TestStruct{a: 1}
+    assert actual |> must_contain(expected)
   end
 
   test "a Struct is like a Struct with a subset of the attributes" do
-    assert %TestStruct{a: 1, b: 2} |> like?(%TestStruct{a: 1})
+    actual = %TestStruct{a: 1, b: 2}
+    expected = %{a: 1}
+
+    assert actual |> must_contain(TestStruct, expected)
   end
 
   test "a Struct is not like a Struct with a superset of the attributes" do
-    refute %TestStruct{a: 1} |> like?(%TestStruct{a: 1, b: 2})
+    actual = %TestStruct{a: 1}
+    expected = %{a: 1, b: 2}
+
+    func = fn -> assert actual |> must_contain(TestStruct, expected) end
+
+    assert_raise ExUnit.AssertionError, """
+    Actual value was not an exact match for Expected value:
+
+    At:
+    Map[:b]
+
+    Actual:
+    nil
+
+    Expected:
+    2
+
+    """, func
   end
 
   test "a Struct is not like a Struct with the same attributes but different struct types" do
-    refute %TestStruct{a: 1} |> like?(%FooStruct{a: 1})
+    actual = %TestStruct{a: 1}
+    expected = %{a: 1, b: 2}
+
+    func = fn -> assert actual |> must_contain(FooStruct, expected) end
+
+    assert_raise ExUnit.AssertionError, """
+    Actual value was not like Expected value:
+
+    Actual:
+    %LikenTest.TestStruct{a: 1, b: nil}
+
+    Expected:
+    %{a: 1, b: 2}
+
+    """, func
   end
 
+  @tag :pending
   test "fail it" do
-    assert %{a: 1} |> like?(%{a: 2})
+    assert %{a: 1} |> must_contain(%{a: 2})
   end
 end
